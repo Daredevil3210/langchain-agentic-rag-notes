@@ -1,0 +1,24 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Python environments and generated files
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# IDE files
+.idea/
+.vscode/
+
+# Local exercises excluded from this repository
+exercise1.py
+
+# OS files
+.DS_Store
+Thumbs.db
