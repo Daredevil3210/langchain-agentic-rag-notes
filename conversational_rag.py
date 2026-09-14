@@ -87,7 +87,7 @@ def main():
         print(f'   🔍 Agent searching for: "{query}"')
         results=vector_store.similarity_search(query,k=8)
         if not results:
-            return "No relevant Python documentation found."
+            return "No relevant Langchain documentation found."
         return "\n\n".join(
             f"[{doc.metadata['source']}]: {doc.page_content}"
             for doc in results

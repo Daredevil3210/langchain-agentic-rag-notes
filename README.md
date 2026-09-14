@@ -9,7 +9,7 @@ Markdown 文档
   → TextLoader 加载
   → RecursiveCharacterTextSplitter 切分
   → 嵌入模型向量化
-  → InMemoryVectorStore 建库
+  → InMemoryVectorStore 或 Milvus 建库
   → Agent 调用检索工具
   → 根据资料回答问题
 ```
@@ -25,12 +25,14 @@ Markdown 文档
 - 测试普通知识、资料相关和知识库未覆盖的问题。
 - 支持终端多轮对话，将用户问题和最终回答保存在当前会话中。
 - 支持 `reset` 清空对话、`exit` / `quit` 退出，以及 CI 模式下回答一个问题后退出。
+- 提供使用 `pymilvus.MilvusClient` 的挑战 1 版本，手动生成向量、写入记录并检索正文与来源。
 
 ## 项目结构
 
 ```text
 .
 ├── knowledge_base_rag.py
+├── knowledge_base_rag - Milvus.py
 ├── conversational_rag.py
 └── rag_assignment_materials/
     ├── README.md
@@ -80,6 +82,30 @@ python knowledge_base_rag.py
 
 程序会依次测试问题，并打印最终回答以及是否调用了检索工具。
 
+### Milvus 版批量问题测试
+
+在上述依赖之外安装 PyMilvus，并提前启动可访问的 Milvus 服务。仅安装 Python 客户端不会启动数据库服务。
+
+```powershell
+python -m pip install pymilvus
+python "knowledge_base_rag - Milvus.py"
+```
+
+运行前检查脚本顶部的配置：
+
+```python
+MILVUS_URI = "http://localhost:19530"
+DB_NAME = "rag_project1"
+COLLECTION_NAME = "docs"
+EMBED_DIM = 1024
+```
+
+`MILVUS_URI` 是数据库服务地址；当前代码没有设置认证参数，如果服务启用了认证，需要在 `MilvusClient` 初始化时补充对应配置。嵌入向量维度需要与 `EMBED_DIM` 一致。
+
+这个版本读取相同的 8 份 Markdown 资料，先添加元数据并切分，再调用嵌入模型生成向量。每条写入记录包含 `id`、`vector`、`text`、`source`、`title` 和 `date`。检索使用 `COSINE` 相似度，最多返回 5 个片段；通过 `output_fields=["text", "source"]` 取回正文与来源，整理后交给 Agent 回答。
+
+**当前脚本用于全量重建练习：每次运行都会删除 `rag_project1` 中已有的 `docs` 集合，再重新创建、生成向量和写入资料。请使用专门的练习集合；删除后若后续步骤失败，原集合数据也不会恢复。** 当前尚未实现复用已有向量的启动流程或增量同步。
+
 ### 多轮对话
 
 ```powershell
@@ -115,14 +141,17 @@ Remove-Item Env:CI
 
 ## 当前实现与检索调试
 
-两个脚本都使用 `chunk_size=400`、`chunk_overlap=80`；批量测试脚本当前使用 `k=7`，多轮对话脚本使用 `k=8`。`k` 表示返回的片段数量，不是 Markdown 文件数量。示例资料中记录的项目参数是练习设定，可能与脚本当前调试参数不同。
+三个脚本都使用 `chunk_size=400`、`chunk_overlap=80`；内存版批量测试脚本当前使用 `k=7`，多轮对话脚本使用 `k=8`，Milvus 版使用 `limit=5`。这里的 `k` / `limit` 表示最多返回的片段数量，不是 Markdown 文件数量。示例资料中记录的项目参数是练习设定，可能与脚本当前调试参数不同。
 
-当前代码使用 DeepSeek 的 `deepseek-v4-flash` 和 SiliconFlow 的 `Pro/BAAI/bge-m3`，具体可用性取决于账号和接口配置；需要更换时修改脚本中的模型名称。向量库保存在内存中，每次启动都会重新加载、切分并生成向量。
+当前代码使用 DeepSeek 的 `deepseek-v4-flash` 和 SiliconFlow 的 `Pro/BAAI/bge-m3`，具体可用性取决于账号和接口配置；需要更换时修改脚本中的模型名称。内存版向量库随进程结束而释放；Milvus 版将数据写入数据库，但当前脚本每次启动仍会删除并重建集合。三个入口都会重新加载、切分并生成向量。
 
 如果资料中有答案但回答“不知道”，先查看实际搜索词及返回片段，确认答案是否进入检索结果。检索出片段不代表一定存在答案，也不能保证每次都召回正确片段。修改文档、切分参数或嵌入模型后，重新启动程序以重建向量库。
 
+Milvus 版当前未显式设置一致性级别。如果刚写入后立即搜索未返回预期资料，可以检查数据可见性，并按需要在搜索时设置 `consistency_level="Strong"`；它不替代对搜索词和片段相关性的检查。
+
 ## 版本记录
 
+- [v0.3.0](https://github.com/Daredevil3210/langchain-agentic-rag-notes/releases/tag/v0.3.0)：新增 Milvus 版挑战 1，保存正文、向量和元数据，检索返回正文与来源；补充数据库配置、运行方式和全量重建说明，调整多轮对话的空结果提示。
 - [v0.2.0](https://github.com/Daredevil3210/langchain-agentic-rag-notes/releases/tag/v0.2.0)：新增多轮对话入口、会话重置与退出、CI 单轮运行说明，修正重置命令判断并统一使用来源文件名。
 - [v0.1.0](https://github.com/Daredevil3210/langchain-agentic-rag-notes/releases/tag/v0.1.0)：首个个人知识库 Agentic RAG 示例和 8 份中文 Markdown 资料。
 
