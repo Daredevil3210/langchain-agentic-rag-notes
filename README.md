@@ -26,14 +26,16 @@ Markdown 文档
 - 支持终端多轮对话，将用户问题和最终回答保存在当前会话中。
 - 支持 `reset` 清空对话、`exit` / `quit` 退出，以及 CI 模式下回答一个问题后退出。
 - 提供使用 `pymilvus.MilvusClient` 的挑战 1 版本，手动生成向量、写入记录并检索正文与来源。
+- 提供 Milvus 多轮对话版本，支持追问、会话重置，并在专用集合中更新当前资料。
 
 ## 项目结构
 
 ```text
 .
 ├── knowledge_base_rag.py
-├── knowledge_base_rag - Milvus.py
+├── knowledge_base_rag_Milvus.py
 ├── conversational_rag.py
+├── conversational_rag_Milvus.py
 └── rag_assignment_materials/
     ├── README.md
     ├── questions.md
@@ -88,7 +90,7 @@ python knowledge_base_rag.py
 
 ```powershell
 python -m pip install pymilvus
-python "knowledge_base_rag - Milvus.py"
+python knowledge_base_rag_Milvus.py
 ```
 
 运行前检查脚本顶部的配置：
@@ -105,6 +107,8 @@ EMBED_DIM = 1024
 这个版本读取相同的 8 份 Markdown 资料，先添加元数据并切分，再调用嵌入模型生成向量。每条写入记录包含 `id`、`vector`、`text`、`source`、`title` 和 `date`。检索使用 `COSINE` 相似度，最多返回 5 个片段；通过 `output_fields=["text", "source"]` 取回正文与来源，整理后交给 Agent 回答。
 
 **当前脚本用于全量重建练习：每次运行都会删除 `rag_project1` 中已有的 `docs` 集合，再重新创建、生成向量和写入资料。请使用专门的练习集合；删除后若后续步骤失败，原集合数据也不会恢复。** 当前尚未实现复用已有向量的启动流程或增量同步。
+
+该入口从 v0.4.0 起由 `knowledge_base_rag - Milvus.py` 重命名为 `knowledge_base_rag_Milvus.py`。
 
 ### 多轮对话
 
@@ -129,6 +133,20 @@ exit
 - `exit` 或 `quit` 退出程序，空输入会被忽略。
 - 对话历史只保存用户消息和最终回答，不保存完整工具调用过程；关闭程序后不会保留历史。
 
+### Milvus 版多轮对话
+
+安装 PyMilvus 并启动 Milvus 服务后运行：
+
+```powershell
+python conversational_rag_Milvus.py
+```
+
+提问、追问、`reset`、`exit` / `quit` 和 CI 模式的用法与内存版相同。当前切分参数为 `chunk_size=1200`、`chunk_overlap=150`，最多检索 8 个片段。
+
+此版本使用 `rag_project1` 数据库下的 **`docs_conversational` 专用集合**，与批量版的 `docs` 分开。集合不存在时创建，存在时保留；每次启动仍会重新读取资料、生成全部向量并按片段编号 `upsert`，随后删除本次编号范围之外的旧记录，以避免资料变少或切分变化后残留旧片段。集合只供该脚本管理，导入过程不支持多个实例并发写入，也不是事务式更新；若中途失败，应修复问题后重新完整运行。
+
+脚本检查目录、空文档以及嵌入向量数量和维度；搜索采用 `Strong` 一致性读取新写入的数据。`reset` 仅清空当前会话，不清空集合。数据库保存知识库数据，但聊天记录仍仅保存在当前 Python 进程中。
+
 ### CI 模式
 
 只有环境变量 `CI` 的值为小写字符串 `true` 时才启用：成功回答一个问题后自动退出。它仍需输入问题，也仍然调用真实的嵌入和问答服务，并不是离线测试模式。
@@ -139,18 +157,21 @@ $env:CI = "true"
 Remove-Item Env:CI
 ```
 
+测试 Milvus 多轮版时，将上述脚本名换成 `conversational_rag_Milvus.py`。两种批量测试入口不使用这一单轮退出设置。
+
 ## 当前实现与检索调试
 
-三个脚本都使用 `chunk_size=400`、`chunk_overlap=80`；内存版批量测试脚本当前使用 `k=7`，多轮对话脚本使用 `k=8`，Milvus 版使用 `limit=5`。这里的 `k` / `limit` 表示最多返回的片段数量，不是 Markdown 文件数量。示例资料中记录的项目参数是练习设定，可能与脚本当前调试参数不同。
+内存版的两个入口及 Milvus 批量版使用 `chunk_size=400`、`chunk_overlap=80`；Milvus 多轮版使用 `1200` / `150`。内存版批量检索使用 `k=7`，内存版多轮使用 `k=8`；Milvus 批量版使用 `limit=5`，Milvus 多轮版使用 `limit=8`。这里的 `k` / `limit` 表示最多返回的片段数量，不是 Markdown 文件数量。示例资料中记录的项目参数是练习设定，可能与脚本当前调试参数不同。
 
-当前代码使用 DeepSeek 的 `deepseek-v4-flash` 和 SiliconFlow 的 `Pro/BAAI/bge-m3`，具体可用性取决于账号和接口配置；需要更换时修改脚本中的模型名称。内存版向量库随进程结束而释放；Milvus 版将数据写入数据库，但当前脚本每次启动仍会删除并重建集合。三个入口都会重新加载、切分并生成向量。
+当前代码使用 DeepSeek 的 `deepseek-v4-flash` 和 SiliconFlow 的 `Pro/BAAI/bge-m3`，具体可用性取决于账号和接口配置；需要更换时修改脚本中的模型名称。内存版向量库随进程结束而释放；Milvus 批量版每次删除并重建集合，多轮版保留集合并更新记录。四个入口都会重新加载、切分并生成向量；尚未实现跳过未变更文档的嵌入计算。
 
 如果资料中有答案但回答“不知道”，先查看实际搜索词及返回片段，确认答案是否进入检索结果。检索出片段不代表一定存在答案，也不能保证每次都召回正确片段。修改文档、切分参数或嵌入模型后，重新启动程序以重建向量库。
 
-Milvus 版当前未显式设置一致性级别。如果刚写入后立即搜索未返回预期资料，可以检查数据可见性，并按需要在搜索时设置 `consistency_level="Strong"`；它不替代对搜索词和片段相关性的检查。
+Milvus 批量版当前未显式设置一致性级别。如果刚写入后立即搜索未返回预期资料，可以检查数据可见性，并按需要在搜索时设置 `consistency_level="Strong"`。Milvus 多轮版已设置该选项；它不替代对搜索词和片段相关性的检查。
 
 ## 版本记录
 
+- [v0.4.0](https://github.com/Daredevil3210/langchain-agentic-rag-notes/releases/tag/v0.4.0)：新增 Milvus 多轮对话入口，使用独立集合并清理多余旧片段，修正空文档检查，新增向量校验；重命名 Milvus 批量脚本并更新运行说明。
 - [v0.3.0](https://github.com/Daredevil3210/langchain-agentic-rag-notes/releases/tag/v0.3.0)：新增 Milvus 版挑战 1，保存正文、向量和元数据，检索返回正文与来源；补充数据库配置、运行方式和全量重建说明，调整多轮对话的空结果提示。
 - [v0.2.0](https://github.com/Daredevil3210/langchain-agentic-rag-notes/releases/tag/v0.2.0)：新增多轮对话入口、会话重置与退出、CI 单轮运行说明，修正重置命令判断并统一使用来源文件名。
 - [v0.1.0](https://github.com/Daredevil3210/langchain-agentic-rag-notes/releases/tag/v0.1.0)：首个个人知识库 Agentic RAG 示例和 8 份中文 Markdown 资料。
