@@ -209,6 +209,8 @@ def main():
 #    - Add agent's response to history
 #    - Continue conversation loop
 
+        # Record the length before appending so we can roll back this turn on error
+        history_len = len(conversation_history)
         conversation_history.append(HumanMessage(content=user_input))
         try:
             response = agent.invoke({
@@ -223,8 +225,12 @@ def main():
             if is_ci and question_count >= 1:
                 print("✅ CI Mode: Answered one question successfully. Exiting.\n")
                 break
-        except Exception as e:(
-            print(f"Error: {e}"))
+        except Exception as e:
+            # Roll back this turn's messages so a failed question is not
+            # resent to the model on every later turn.
+            del conversation_history[history_len:]
+            print(f"Error: {e}")
+            print("该问题处理失败，已从对话历史中移除，请重试。\n")
 if __name__ == "__main__":
     main()
 # 5. Handle special commands:
